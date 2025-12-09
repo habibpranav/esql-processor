@@ -1,0 +1,12 @@
+SELECT
+    cust, avg(X.quant), avg(Y.quant), avg(Z.quant)
+    FROM Sales
+    Group by cust; X,Y,Z
+
+SUCH THAT
+    X.cust = cust AND X.state = 'NY',
+    Y.cust = cust AND Y.state = 'CT',
+    Z.cust = cust AND Z.state = 'NJ'
+
+HAVING
+    avg(X.quant) > avg(Y.quant) AND avg(X.quant) > avg(Z.quant)
