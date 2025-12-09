@@ -10,3 +10,8 @@ SUCH THAT
 
 HAVING
     avg(X.quant) > avg(Y.quant) AND avg(X.quant) > avg(Z.quant)
+
+
+
+
+

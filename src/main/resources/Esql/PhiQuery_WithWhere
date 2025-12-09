@@ -1,0 +1,15 @@
+FROM:
+sales
+WHERE:
+year=2016
+SELECT ATTRIBUTE(S):
+prod, month, sum(1.quant)/sum(2.quant)
+NUMBER OF GROUPING VARIABLES(n):
+2
+GROUPING ATTRIBUTES(V):
+prod, month
+F-VECT([F]):
+sum(1.quant), sum(2.quant)
+SELECT CONDITION-VECT([σ]):
+1.prod=prod and 1.month=month
+2.prod=prod

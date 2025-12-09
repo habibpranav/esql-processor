@@ -12,84 +12,73 @@ import java.util.*;
  *   GROUPING VARIABLE NAMES
  *   SUCH THAT
  *   HAVING
- *
- * It also parses:
- *   - Condition expressions (AND + OR + unary NOT)
- *   - Atomic conditions (>=, <=, <>, >, <, =)
- *   - Aggregate functions in SELECT
  */
 public class EMFParser {
 
-
-    // Raw String entry point
     public EMFQuery parse(String raw) {
-
         if (raw == null || raw.trim().isEmpty()) {
             throw new RuntimeException("Empty query received.");
         }
 
-        // Convert the entered String in uppercase keywords and remove the extra whitespaces
-        String input = raw.toUpperCase().trim().replaceAll("\\s+", " ");
+        // Remove comments (lines starting with ---, //, #, or --)
+        String[] lines = raw.split("\n");
+        StringBuilder cleanedQuery = new StringBuilder();
+        for (String line : lines) {
+            String trimmedLine = line.trim();
+            if (trimmedLine.startsWith("---") ||
+                trimmedLine.startsWith("//") ||
+                trimmedLine.startsWith("#") ||
+                trimmedLine.startsWith("--")) {
+                break;
+            }
+            cleanedQuery.append(line).append(" ");
+        }
+        raw = cleanedQuery.toString();
 
-        // Extract SELECT, FROM, WHERE, GROUP BY, SUCH THAT, HAVING
+        // Extract string literals to preserve their case
+        List<String> stringLiterals = new ArrayList<>();
+        String temp = raw;
+        int literalIndex = 0;
+
+        while (temp.contains("'")) {
+            int start = temp.indexOf("'");
+            int end = temp.indexOf("'", start + 1);
+            if (end == -1) break;
+
+            String literal = temp.substring(start, end + 1);
+            stringLiterals.add(literal);
+            temp = temp.substring(0, start) + "___LITERAL_" + literalIndex + "___" + temp.substring(end + 1);
+            literalIndex++;
+        }
+
+        String input = temp.toLowerCase().trim().replaceAll("\\s+", " ");
+
+        for (int i = 0; i < stringLiterals.size(); i++) {
+            input = input.replace("___literal_" + i + "___", stringLiterals.get(i));
+        }
+
         Map<String, String> sections = extractSections(input);
 
         EMFQuery q = new EMFQuery();
-
-        // SELECT
-        q.selectAttributes = parseSelect(sections.get("SELECT"));
-
-        // FROM
-        q.fromTable = parseFrom(sections.get("FROM"));
-
-        // WHERE
-        q.whereConditions = parseWhere(sections.get("WHERE"));
-
-        // GROUP BY (attributes + grouping variable names)
-        parseGroupBy(q, sections.get("GROUP BY"));
-
-        // SUCH THAT uses groupingVariableNames
-        q.suchThatMap = parseSuchThat(sections.get("SUCH THAT"), q.groupingVariableNames);
-
-        // Parse aggregate functions (F-VECTORS)
+        q.selectAttributes = parseSelect(sections.get("select"));
+        q.fromTable = parseFrom(sections.get("from"));
+        q.whereConditions = parseWhere(sections.get("where"));
+        parseGroupBy(q, sections.get("group by"));
+        q.suchThatMap = parseSuchThat(sections.get("such that"), q.groupingVariableNames);
         q.fVectors = parseFVectorsFromSelect(q.selectAttributes);
-
-        // HAVING
-        q.havingConditions = parseHaving(sections.get("HAVING"));
+        extractAggregatesFromSuchThat(q.suchThatMap, q.fVectors);
+        q.havingConditions = parseHaving(sections.get("having"));
+        extractAggregatesFromHaving(q.havingConditions, q.fVectors);
 
         return q;
     }
 
-
-
-    // Extract Query Sections
     private Map<String, String> extractSections(String input) {
-
-        String[] order = {
-                "SELECT",
-                "FROM",
-                "WHERE",
-                "GROUP BY",
-                "SUCH THAT",
-                "HAVING"
-        };
-
+        String[] order = {"select", "from", "where", "group by", "such that", "having"};
         Map<String, String> map = new HashMap<>();
 
         for (int i = 0; i < order.length; i++) {
-
-            String key  = order[i];
-
-
-            String next = (i + 1 < order.length) ? order[i + 1] : null;
-
-
-
-
-            /**
-             * `start` stores the starting position of the keys that match in our ESQL query.
-             * It returns -1 if no matching value for the key is found.
-             */
+            String key = order[i];
             int start = input.indexOf(key);
 
             if (start == -1) {
@@ -97,24 +86,14 @@ public class EMFParser {
                 continue;
             }
 
-            /*
-             * Since all the keys are just labels, we need the part that starts after these labels.
-             * So we move our pointer to where the label ends.
-             */
             start = start + key.length();
+            int end = input.length();
 
-            int end;
-
-            if (next == null) {
-
-                end = input.length();
-            } else {
-
-                end = input.indexOf(next, start);
-
-
-                if (end == -1) {
-                    end = input.length();
+            for (int j = i + 1; j < order.length; j++) {
+                int pos = input.indexOf(order[j], start);
+                if (pos != -1) {
+                    end = pos;
+                    break;
                 }
             }
 
@@ -124,15 +103,7 @@ public class EMFParser {
         return map;
     }
 
-
-
-
-
-
-    // Parses SELECT
-
     private List<String> parseSelect(String s) {
-
         if (s == null || s.trim().isEmpty()) {
             return new ArrayList<>();
         }
@@ -147,67 +118,38 @@ public class EMFParser {
         return out;
     }
 
-
-
-
-
-
-    // Parses FROM
-
     private String parseFrom(String s) {
-
         if (s == null || s.trim().isEmpty()) {
             throw new RuntimeException("FROM clause missing.");
         }
-
         return s.trim();
     }
 
-
-
-
-
-
-    // Parses  WHERE
-
     private ConditionExpression parseWhere(String s) {
-
         if (s == null || s.trim().isEmpty()) {
             return new ConditionExpression();
         }
-
         return parseConditionExpression(s.trim());
     }
 
-
-
-
-
-    // --------------------------
-    // GROUP BY (attributes : GV names)
-    // --------------------------
     private void parseGroupBy(EMFQuery q, String s) {
-
         if (s == null || s.trim().isEmpty()) {
             q.groupingAttributes = new ArrayList<>();
             q.groupingVariableNames = new ArrayList<>();
             return;
         }
 
-        // Example:  GROUP BY cust, month: X, Y, Z
-        String[] parts = s.split(":");
+        String[] parts = s.split("[;:]");
 
         if (parts.length == 0) {
             throw new RuntimeException("Invalid GROUP BY syntax.");
         }
 
-        // LEFT SIDE = grouping attributes
         String left = parts[0].trim();
         String[] attrs = left.split(",");
         q.groupingAttributes = new ArrayList<>();
         for (String a : attrs) q.groupingAttributes.add(a.trim());
 
-        // RIGHT SIDE = grouping variable names (X,Y,Z)
         q.groupingVariableNames = new ArrayList<>();
         if (parts.length > 1) {
             String right = parts[1].trim();
@@ -216,130 +158,212 @@ public class EMFParser {
         }
     }
 
-
-
-
-
-    // --------------------------
-    // SUCH THAT section
-    // --------------------------
     private HashMap<String, ConditionExpression> parseSuchThat(String s, List<String> gvNames) {
-
         HashMap<String, ConditionExpression> out = new HashMap<>();
 
         if (s == null || s.trim().isEmpty()) {
             return out;
         }
 
-        // multiple GV conditions separated by commas
-        String[] lines = s.split(",");
+        s = s.trim();
+        if (s.startsWith(":")) {
+            s = s.substring(1).trim();
+        }
 
-        for (String line : lines) {
+        for (String gvName : gvNames) {
+            String pattern = gvName + ".";
+            int startIdx = s.indexOf(pattern);
 
-            line = line.trim();
-            if (line.isEmpty()) continue;
-
-            // Example: X.CUST = CUST AND X.STATE = 'NY'
-            int dot = line.indexOf(".");
-            if (dot == -1) {
-                throw new RuntimeException("Invalid SUCH THAT condition: " + line);
+            if (startIdx == -1) {
+                continue;
             }
 
-            // Extract GV name
-            String gvName = line.substring(0, dot).trim();
-
-            // Validate GV exists
-            if (!gvNames.contains(gvName)) {
-                throw new RuntimeException("Grouping variable " + gvName + " not declared in GROUP BY.");
+            int endIdx = s.length();
+            for (String otherGV : gvNames) {
+                if (otherGV.equals(gvName)) continue;
+                int otherIdx = findNextGVStart(s, otherGV + ".", startIdx + pattern.length());
+                if (otherIdx != -1 && otherIdx < endIdx) {
+                    endIdx = otherIdx;
+                }
             }
 
-            // Parse entire condition
-            ConditionExpression expr = parseConditionExpression(line);
+            String condition = s.substring(startIdx, endIdx).trim();
 
+            if (condition.endsWith(",")) {
+                condition = condition.substring(0, condition.length() - 1).trim();
+            }
+
+            String lowerCond = condition.toLowerCase();
+            if (lowerCond.endsWith(" and")) {
+                condition = condition.substring(0, condition.length() - 4).trim();
+            } else if (lowerCond.endsWith(" or")) {
+                condition = condition.substring(0, condition.length() - 3).trim();
+            }
+
+            ConditionExpression expr = parseConditionExpression(condition);
             out.put(gvName, expr);
         }
 
         return out;
     }
 
+    private int findNextGVStart(String s, String pattern, int fromIndex) {
+        int parenDepth = 0;
+        int pos = fromIndex;
 
+        while (pos < s.length()) {
+            char c = s.charAt(pos);
 
+            if (c == '(') {
+                parenDepth++;
+            } else if (c == ')') {
+                parenDepth--;
+            }
 
+            if (parenDepth == 0 && pos + pattern.length() <= s.length()) {
+                if (s.substring(pos, pos + pattern.length()).equals(pattern)) {
+                    return pos;
+                }
+            }
 
-    // --------------------------
-    // PARSE F-VECTORS (AGGREGATES)
-    // --------------------------
+            pos++;
+        }
+
+        return -1;
+    }
+
     private List<AggregateFunction> parseFVectorsFromSelect(List<String> selectList) {
-
         List<AggregateFunction> list = new ArrayList<>();
 
         for (String item : selectList) {
-
             if (!item.contains("(")) continue;
-
-            String fn = item.substring(0, item.indexOf("(")).trim();
-
-            String inside = item.substring(
-                    item.indexOf("(") + 1,
-                    item.indexOf(")")
-            ).trim();
-
-            String[] parts = inside.split("\\.");
-
-            String gv  = parts[0].trim();
-            String att = parts[1].trim();
-
-            list.add(new AggregateFunction(fn, gv, att));
+            extractAggregatesFromExpression(item, list);
         }
 
         return list;
     }
 
+    private void extractAggregatesFromExpression(String expr, List<AggregateFunction> list) {
+        int pos = 0;
+        while (pos < expr.length()) {
+            int openParen = expr.indexOf("(", pos);
+            if (openParen == -1) break;
 
+            int fnStart = openParen - 1;
+            while (fnStart >= 0 && Character.isLetterOrDigit(expr.charAt(fnStart))) {
+                fnStart--;
+            }
+            fnStart++;
 
+            if (fnStart >= openParen) {
+                pos = openParen + 1;
+                continue;
+            }
 
+            String fn = expr.substring(fnStart, openParen).trim();
 
-    // --------------------------
-    // HAVING
-    // --------------------------
+            if (fn.matches("(sum|avg|count|min|max)")) {
+                int closeParen = openParen + 1;
+                int parenCount = 1;
+                while (closeParen < expr.length() && parenCount > 0) {
+                    if (expr.charAt(closeParen) == '(') parenCount++;
+                    if (expr.charAt(closeParen) == ')') parenCount--;
+                    closeParen++;
+                }
+
+                String inside = expr.substring(openParen + 1, closeParen - 1).trim();
+
+                if (inside.contains(".")) {
+                    String[] parts = inside.split("\\.");
+                    String gv = parts[0].trim();
+                    String att = parts[1].trim();
+
+                    boolean exists = false;
+                    for (AggregateFunction existing : list) {
+                        if (existing.getFunctionName().equals(fn) &&
+                            existing.getGroupingVarName().equals(gv) &&
+                            existing.getAttribute().equals(att)) {
+                            exists = true;
+                            break;
+                        }
+                    }
+
+                    if (!exists) {
+                        list.add(new AggregateFunction(fn, gv, att));
+                    }
+                }
+
+                pos = closeParen;
+            } else {
+                pos = openParen + 1;
+            }
+        }
+    }
+
+    private void extractAggregatesFromSuchThat(Map<String, ConditionExpression> suchThatMap,
+                                                 List<AggregateFunction> fVectors) {
+        if (suchThatMap == null || suchThatMap.isEmpty()) {
+            return;
+        }
+
+        for (ConditionExpression condExpr : suchThatMap.values()) {
+            if (condExpr == null || condExpr.conditions.isEmpty()) {
+                continue;
+            }
+
+            for (Condition cond : condExpr.conditions) {
+                extractAggregatesFromExpression(cond.left, fVectors);
+                extractAggregatesFromExpression(cond.right, fVectors);
+            }
+        }
+    }
+
+    private void extractAggregatesFromHaving(ConditionExpression havingExpr,
+                                              List<AggregateFunction> fVectors) {
+        if (havingExpr == null || havingExpr.conditions.isEmpty()) {
+            return;
+        }
+
+        for (Condition cond : havingExpr.conditions) {
+            extractAggregatesFromExpression(cond.left, fVectors);
+            extractAggregatesFromExpression(cond.right, fVectors);
+        }
+    }
+
     private ConditionExpression parseHaving(String s) {
-
         if (s == null || s.trim().isEmpty()) {
             return new ConditionExpression();
+        }
+
+        s = s.trim();
+        if (s.startsWith(":")) {
+            s = s.substring(1).trim();
         }
 
         return parseConditionExpression(s.trim());
     }
 
-
-
-
-
-    // --------------------------
-    // PARSE CONDITION EXPRESSIONS (AND / OR)
-    // --------------------------
     private ConditionExpression parseConditionExpression(String s) {
-
         ConditionExpression expr = new ConditionExpression();
 
         s = s.trim().replaceAll("\\s+", " ");
 
-        String[] tokens = s.split("(?i)AND|(?i)OR");
+        String[] tokens = s.split("(?i)and|(?i)or");
 
-        List<String> ops = new ArrayList<>();
-        String temp = s.toUpperCase();
+        ArrayList<String> ops = new ArrayList<>();
+        String temp = s.toLowerCase();
 
         while (true) {
-            int andPos = temp.indexOf("AND");
-            int orPos  = temp.indexOf("OR");
+            int andPos = temp.indexOf("and");
+            int orPos  = temp.indexOf("or");
 
             if (andPos == -1 && orPos == -1) break;
 
             if (andPos != -1 && (orPos == -1 || andPos < orPos)) {
-                ops.add("AND");
+                ops.add("and");
                 temp = temp.substring(andPos + 3);
             } else {
-                ops.add("OR");
+                ops.add("or");
                 temp = temp.substring(orPos + 2);
             }
         }
@@ -355,18 +379,10 @@ public class EMFParser {
         return expr;
     }
 
-
-
-
-
-    // --------------------------
-    // PARSE A SINGLE ATOMIC CONDITION
-    // --------------------------
     private Condition parseSingleCondition(String s) {
-
         boolean neg = false;
 
-        if (s.startsWith("NOT ")) {
+        if (s.startsWith("not ")) {
             neg = true;
             s = s.substring(4).trim();
         }
