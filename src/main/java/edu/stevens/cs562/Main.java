@@ -46,6 +46,10 @@ public class Main {
                         queryBuilder.append(line).append("\n");
                     }
                     rawQuery = queryBuilder.toString();
+
+
+
+
                 } else {
                     // Interactive Phi operator prompts
                     System.out.println("\n=== PHI OPERATOR INPUT (6 OPERANDS) ===\n");
@@ -154,4 +158,10 @@ public class Main {
     private static String readFile(String filePath) throws IOException {
         return Files.readString(Paths.get(filePath));
     }
+
+
+
+
+
+
 }
