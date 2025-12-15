@@ -28,6 +28,12 @@ public class Main {
                 inputFormat = scanner.nextInt();
                 scanner.nextLine(); // consume newline
 
+                // Validate input
+                if (inputFormat != 1 && inputFormat != 2) {
+                    System.err.println("Invalid choice. Please enter 1 or 2.");
+                    System.exit(1);
+                }
+
                 // Read from stdin
                 if (inputFormat == 1) {
                     System.out.println("\nEnter your EMF query in ESQL syntax (type 'DONE' on a new line when finished):");
