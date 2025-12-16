@@ -28,6 +28,9 @@ public class PhiConverter {
         // 4. F-VECT - Aggregate functions
         phi.fVect = query.fVectors;
 
+        // Analyze dependencies and reorder grouping variables if needed
+        List<String> orderedGVNames = computeScanOrder(query);
+
         // 5.  (sigma) - Predicates [σ0, σ1, ..., σn]
         //    THIS IS THE KEY INSIGHT!
         //    σ0 = WHERE clause
