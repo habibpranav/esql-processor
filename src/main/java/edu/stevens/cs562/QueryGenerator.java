@@ -14,6 +14,77 @@ public class QueryGenerator {
 
     public QueryGenerator(PhiOperator phi) {
         this.phi = phi;
+        loadColumnTypesFromDatabase();
+    }
+
+    /**
+     * Dynamically load column types from the database using JDBC metadata.
+     * Falls back to defaults if DB connection fails.
+     */
+    private void loadColumnTypesFromDatabase() {
+        try {
+            Properties props = new Properties();
+            props.load(new FileInputStream("src/main/resources/db.properties"));
+            String url = "jdbc:postgresql://localhost:5432/" + props.getProperty("db.name");
+            Connection conn = DriverManager.getConnection(url,
+                props.getProperty("db.user"),
+                props.getProperty("db.password"));
+
+            DatabaseMetaData metaData = conn.getMetaData();
+            ResultSet columns = metaData.getColumns(null, null, phi.fromTable, null);
+
+            while (columns.next()) {
+                String columnName = columns.getString("COLUMN_NAME").toLowerCase();
+                int sqlType = columns.getInt("DATA_TYPE");
+
+                // Map SQL types to our simple type system
+                String type;
+                switch (sqlType) {
+                    case Types.INTEGER:
+                    case Types.SMALLINT:
+                    case Types.BIGINT:
+                    case Types.TINYINT:
+                        type = "int";
+                        break;
+                    case Types.FLOAT:
+                    case Types.DOUBLE:
+                    case Types.DECIMAL:
+                    case Types.NUMERIC:
+                    case Types.REAL:
+                        type = "double";
+                        break;
+                    default:
+                        type = "string";
+                }
+                columnTypes.put(columnName, type);
+            }
+
+            columns.close();
+            conn.close();
+
+            System.out.println("Loaded column types from database: " + columnTypes);
+
+        } catch (Exception e) {
+            System.err.println("Warning: Could not load column types from database, using defaults. " + e.getMessage());
+            // Fallback to hardcoded defaults for sales table
+            columnTypes.put("day", "int");
+            columnTypes.put("month", "int");
+            columnTypes.put("year", "int");
+            columnTypes.put("quant", "int");
+            columnTypes.put("cust", "string");
+            columnTypes.put("prod", "string");
+            columnTypes.put("state", "string");
+            columnTypes.put("date", "string");
+        }
+    }
+
+    private String getColumnType(String column) {
+        return columnTypes.getOrDefault(column.toLowerCase(), "string");
+    }
+
+    private boolean isNumericColumn(String column) {
+        String type = getColumnType(column);
+        return type.equals("int") || type.equals("double");
     }
 
     public String generate() {
