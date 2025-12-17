@@ -1,3 +1,5 @@
+From:
+sales
 SELECT ATTRIBUTE(S):
 cust, avg(1.quant), avg(2.quant), avg(3.quant)
 NUMBER OF GROUPING VARIABLES(n):

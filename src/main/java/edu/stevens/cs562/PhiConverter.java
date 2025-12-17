@@ -3,15 +3,13 @@ package edu.stevens.cs562;
 /**
  * Converts EMFQuery to PhiOperator
  *
- * This is the critical conversion layer that maps the parsed ESQL query
- * into the canonical 6-operand Phi representation used by the algorithm.
+ * Maps the parsed ESQL query into the 6-operand Phi representation:
+ *   S, n, V, F-VECT, σ-VECT, G
  */
 public class PhiConverter {
 
     /**
      * Convert EMFQuery → PhiOperator
-     *
-     * Key insight: predicates[0] = WHERE, predicates[1..n] = SUCH THAT for each grouping var
      */
     public static PhiOperator convert(EMFQuery query) {
         PhiOperator phi = new PhiOperator();
@@ -28,20 +26,11 @@ public class PhiConverter {
         // 4. F-VECT - Aggregate functions
         phi.fVect = query.fVectors;
 
-        // Analyze dependencies and reorder grouping variables if needed
-        List<String> orderedGVNames = computeScanOrder(query);
-
-        // 5.  (sigma) - Predicates [σ0, σ1, ..., σn]
-        //    THIS IS THE KEY INSIGHT!
+        // 5. σ (sigma) - Predicates [σ0, σ1, ..., σn]
         //    σ0 = WHERE clause
-        //    σ1 = SUCH THAT for grouping variable 1
-        //    σ2 = SUCH THAT for grouping variable 2
-        //    ...
-
-        // σ0 = WHERE clause (used in SCAN 0 to filter rows)
+        //    σ1..σn = SUCH THAT for each grouping variable
         phi.predicates.add(query.whereConditions != null ? query.whereConditions : new ConditionExpression());
 
-        // σ1..σn = SUCH THAT for each grouping variable (used in SCAN 1..n)
         for (String gvName : query.groupingVariableNames) {
             ConditionExpression suchThat = query.suchThatMap.get(gvName);
             phi.predicates.add(suchThat != null ? suchThat : new ConditionExpression());

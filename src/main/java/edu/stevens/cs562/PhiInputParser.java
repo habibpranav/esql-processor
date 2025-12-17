@@ -17,7 +17,7 @@ import java.util.*;
  * 1.state='NY'
  * 2.state='NJ'
  * 3.state='CT'
- * HAVING_CONDITION(G):
+ * HAVING_CONDITION(G) 𝛔
  * 1_sum_quant > 2 * 2_sum_quant or 1_avg_quant > 3_avg_quant
  */
 public class PhiInputParser {
@@ -128,37 +128,46 @@ public class PhiInputParser {
             query.whereConditions = parseConditionExpression(whereCondition);
         }
 
-        // Extract grouping variable names from predicates (1.state, 2.state, etc.)
-        query.groupingVariableNames = new ArrayList<>();
-        for (int i = 1; i <= n; i++) {
-            query.groupingVariableNames.add(String.valueOf(i));
+        // Extract grouping variable names from F-VECT, select attrs, or predicates
+        // Supports both numbered (1, 2, 3) and named (X, Y, Z) formats
+        Set<String> varNamesSet = new LinkedHashSet<>();
+
+        // First try to extract ALL var names from F-VECT (handles sum(x.quant)/sum(y.quant))
+        for (String agg : fVect) {
+            extractAllVarNames(agg, varNamesSet);
         }
 
-        // Parse F-VECT - can be in two formats:
-        // Format 1: "1_sum_quant" (internal format)
-        // Format 2: "sum(1.quant)" or "avg(X.quant)" (user-friendly format)
-        query.fVectors = new ArrayList<>();
-        for (String agg : fVect) {
-            if (agg.contains("(") && agg.contains(")")) {
-                // Format 2: avg(1.quant) or avg(X.quant)
-                int open = agg.indexOf("(");
-                int close = agg.lastIndexOf(")");
-                String func = agg.substring(0, open).trim();
-                String inside = agg.substring(open + 1, close).trim();
-                String[] parts = inside.split("\\.");
-                String varName = parts[0];
-                String attr = parts.length > 1 ? parts[1] : "*";
-                query.fVectors.add(new AggregateFunction(func, varName, attr));
-            } else if (agg.contains("_")) {
-                // Format 1: 1_sum_quant
-                String[] parts = agg.split("_", 3);
-                if (parts.length == 3) {
-                    String varNum = parts[0];
-                    String func = parts[1];
-                    String attr = parts[2];
-                    query.fVectors.add(new AggregateFunction(func, varNum, attr));
+        // Also extract from select attributes
+        for (String attr : selectAttributes) {
+            extractAllVarNames(attr, varNamesSet);
+        }
+
+        // If we didn't get enough, extract from predicates
+        if (varNamesSet.size() < n) {
+            for (String pred : predicates) {
+                String varName = extractVarNameFromPredicate(pred);
+                if (varName != null) {
+                    varNamesSet.add(varName);
                 }
             }
+        }
+
+        // Convert to list, maintaining order
+        query.groupingVariableNames = new ArrayList<>(varNamesSet);
+
+        // If still not enough, fall back to numbered
+        while (query.groupingVariableNames.size() < n) {
+            query.groupingVariableNames.add(String.valueOf(query.groupingVariableNames.size() + 1));
+        }
+
+        // Parse F-VECT using same logic as EMFParser.extractAggregatesFromExpression
+        query.fVectors = new ArrayList<>();
+        for (String item : fVect) {
+            extractAggregatesFromExpression(item, query.fVectors);
+        }
+        // Also extract from select attributes (for expressions like sum(x.quant)/sum(y.quant))
+        for (String item : selectAttributes) {
+            extractAggregatesFromExpression(item, query.fVectors);
         }
 
         // SELECT attributes - accept both formats:
@@ -169,14 +178,34 @@ public class PhiInputParser {
             query.selectAttributes.add(attr.trim());
         }
 
-        // Parse predicates - convert from Phi format to ESQL format
+        // Parse predicates - extract the variable name FROM the predicate itself
         query.suchThatMap = new HashMap<>();
 
         for (int i = 0; i < predicates.size(); i++) {
             String pred = predicates.get(i);
-            String varNum = String.valueOf(i + 1);
+            // Extract the variable name from the predicate (e.g., "x.prod=prod" -> "x")
+            String varName = extractVarNameFromPredicate(pred);
+            if (varName == null) {
+                // Fallback to position-based
+                varName = (i < query.groupingVariableNames.size())
+                    ? query.groupingVariableNames.get(i)
+                    : String.valueOf(i + 1);
+            }
             // Parse the predicate string into ConditionExpression
-            query.suchThatMap.put(varNum, parseConditionExpression(pred));
+            query.suchThatMap.put(varName, parseConditionExpression(pred));
+        }
+
+        // Also rebuild groupingVariableNames from predicates to maintain correct order
+        query.groupingVariableNames = new ArrayList<>();
+        for (String pred : predicates) {
+            String varName = extractVarNameFromPredicate(pred);
+            if (varName != null && !query.groupingVariableNames.contains(varName)) {
+                query.groupingVariableNames.add(varName);
+            }
+        }
+        // Ensure we have n variables
+        while (query.groupingVariableNames.size() < n) {
+            query.groupingVariableNames.add(String.valueOf(query.groupingVariableNames.size() + 1));
         }
 
         // Parse HAVING condition
@@ -187,60 +216,245 @@ public class PhiInputParser {
         return query;
     }
 
-    private ConditionExpression parseConditionExpression(String predicate) {
+    // Same logic as EMFParser.parseConditionExpression
+    private ConditionExpression parseConditionExpression(String s) {
         ConditionExpression expr = new ConditionExpression();
-        if (predicate == null || predicate.trim().isEmpty()) {
+        if (s == null || s.trim().isEmpty()) {
             return expr;
         }
 
-        // Simple parsing - split by AND/OR
-        String[] parts = predicate.split("\\s+(and|or)\\s+", -1);
-        List<String> operators = new ArrayList<>();
+        s = s.trim().replaceAll("\\s+", " ");
 
-        // Extract operators
-        String temp = predicate;
-        while (temp.contains(" and ") || temp.contains(" or ")) {
-            int andIdx = temp.indexOf(" and ");
-            int orIdx = temp.indexOf(" or ");
+        // Case-insensitive split by AND/OR
+        String[] tokens = s.split("(?i)\\s+and\\s+|(?i)\\s+or\\s+");
 
-            if (andIdx >= 0 && (orIdx < 0 || andIdx < orIdx)) {
-                operators.add("and");
-                temp = temp.substring(andIdx + 5);
-            } else if (orIdx >= 0) {
-                operators.add("or");
-                temp = temp.substring(orIdx + 4);
+        ArrayList<String> ops = new ArrayList<>();
+        String temp = s.toLowerCase();
+
+        while (true) {
+            int andPos = temp.indexOf(" and ");
+            int orPos = temp.indexOf(" or ");
+
+            if (andPos == -1 && orPos == -1) break;
+
+            if (andPos != -1 && (orPos == -1 || andPos < orPos)) {
+                ops.add("and");
+                temp = temp.substring(andPos + 5);
+            } else {
+                ops.add("or");
+                temp = temp.substring(orPos + 4);
             }
         }
 
-        expr.operators = operators;
-
-        // Parse each condition
-        for (String part : parts) {
-            part = part.trim();
-            if (part.isEmpty()) continue;
-
-            Condition cond = parseCondition(part);
-            if (cond != null) {
-                expr.conditions.add(cond);
+        for (String token : tokens) {
+            token = token.trim();
+            if (!token.isEmpty()) {
+                Condition cond = parseSingleCondition(token);
+                if (cond != null) {
+                    expr.conditions.add(cond);
+                }
             }
         }
 
+        expr.operators = ops;
         return expr;
     }
 
-    private Condition parseCondition(String condStr) {
-        // Parse conditions like: 1.state='NY' or 1_sum_quant > 2 * 2_sum_quant
-        String[] operators = {">=", "<=", "<>", "!=", "=", ">", "<"};
+    // Same logic as EMFParser.parseSingleCondition
+    private Condition parseSingleCondition(String s) {
+        boolean neg = false;
 
-        for (String op : operators) {
-            int idx = condStr.indexOf(op);
-            if (idx > 0) {
-                String left = condStr.substring(0, idx).trim();
-                String right = condStr.substring(idx + op.length()).trim();
-                return new Condition(left, op, right, false);
+        if (s.toLowerCase().startsWith("not ")) {
+            neg = true;
+            s = s.substring(4).trim();
+        }
+
+        // Order matters: check multi-char operators first
+        if (s.contains(">=")) return split(s, ">=", neg);
+        if (s.contains("<=")) return split(s, "<=", neg);
+        if (s.contains("<>")) return split(s, "<>", neg);
+        if (s.contains("!=")) return split(s, "!=", neg);
+        if (s.contains(">"))  return split(s, ">",  neg);
+        if (s.contains("<"))  return split(s, "<",  neg);
+        if (s.contains("="))  return split(s, "=",  neg);
+
+        // No operator found - return null
+        return null;
+    }
+
+    private Condition split(String s, String op, boolean neg) {
+        String[] t = s.split(java.util.regex.Pattern.quote(op), 2);
+        if (t.length == 2) {
+            return new Condition(t[0].trim(), op, t[1].trim(), neg);
+        }
+        return null;
+    }
+
+    // Extract ALL variable names from expression - handles complex expressions like sum(x.quant)/sum(y.quant)
+    private String extractVarName(String expr) {
+        // Use same logic as extractAggregatesFromExpression but just return first var name found
+        int pos = 0;
+        while (pos < expr.length()) {
+            int openParen = expr.indexOf("(", pos);
+            if (openParen == -1) break;
+
+            int fnStart = openParen - 1;
+            while (fnStart >= 0 && Character.isLetterOrDigit(expr.charAt(fnStart))) {
+                fnStart--;
+            }
+            fnStart++;
+
+            if (fnStart >= openParen) {
+                pos = openParen + 1;
+                continue;
+            }
+
+            String fn = expr.substring(fnStart, openParen).trim();
+
+            if (fn.matches("(sum|avg|count|min|max)")) {
+                int closeParen = openParen + 1;
+                int parenCount = 1;
+                while (closeParen < expr.length() && parenCount > 0) {
+                    if (expr.charAt(closeParen) == '(') parenCount++;
+                    if (expr.charAt(closeParen) == ')') parenCount--;
+                    closeParen++;
+                }
+
+                String inside = expr.substring(openParen + 1, closeParen - 1).trim();
+                if (inside.contains(".")) {
+                    return inside.split("\\.")[0].trim();
+                }
+                pos = closeParen;
+            } else {
+                pos = openParen + 1;
             }
         }
 
+        // Fallback for underscore format: 1_sum_quant
+        if (expr.contains("_")) {
+            String[] parts = expr.split("_", 3);
+            if (parts.length >= 1) {
+                return parts[0].trim();
+            }
+        }
         return null;
+    }
+
+    // Extract ALL variable names from expression for building groupingVariableNames
+    private void extractAllVarNames(String expr, Set<String> varNames) {
+        int pos = 0;
+        while (pos < expr.length()) {
+            int openParen = expr.indexOf("(", pos);
+            if (openParen == -1) break;
+
+            int fnStart = openParen - 1;
+            while (fnStart >= 0 && Character.isLetterOrDigit(expr.charAt(fnStart))) {
+                fnStart--;
+            }
+            fnStart++;
+
+            if (fnStart >= openParen) {
+                pos = openParen + 1;
+                continue;
+            }
+
+            String fn = expr.substring(fnStart, openParen).trim();
+
+            if (fn.matches("(sum|avg|count|min|max)")) {
+                int closeParen = openParen + 1;
+                int parenCount = 1;
+                while (closeParen < expr.length() && parenCount > 0) {
+                    if (expr.charAt(closeParen) == '(') parenCount++;
+                    if (expr.charAt(closeParen) == ')') parenCount--;
+                    closeParen++;
+                }
+
+                String inside = expr.substring(openParen + 1, closeParen - 1).trim();
+                if (inside.contains(".")) {
+                    varNames.add(inside.split("\\.")[0].trim());
+                }
+                pos = closeParen;
+            } else {
+                pos = openParen + 1;
+            }
+        }
+    }
+
+    // Extract variable name from predicate like "X.cust=cust" or "1.state='NY'"
+    private String extractVarNameFromPredicate(String pred) {
+        // Look for pattern like "X." or "1." at the start
+        int dotIdx = pred.indexOf(".");
+        if (dotIdx > 0) {
+            String potential = pred.substring(0, dotIdx).trim();
+            // Make sure it's just the variable name (no spaces or operators before it)
+            if (potential.matches("[a-zA-Z0-9]+")) {
+                return potential;
+            }
+        }
+        return null;
+    }
+
+    // Same as EMFParser.extractAggregatesFromExpression
+    private void extractAggregatesFromExpression(String expr, List<AggregateFunction> list) {
+        int pos = 0;
+        while (pos < expr.length()) {
+            int openParen = expr.indexOf("(", pos);
+            if (openParen == -1) break;
+
+            int fnStart = openParen - 1;
+            while (fnStart >= 0 && Character.isLetterOrDigit(expr.charAt(fnStart))) {
+                fnStart--;
+            }
+            fnStart++;
+
+            if (fnStart >= openParen) {
+                pos = openParen + 1;
+                continue;
+            }
+
+            String fn = expr.substring(fnStart, openParen).trim();
+
+            if (fn.matches("(sum|avg|count|min|max)")) {
+                int closeParen = openParen + 1;
+                int parenCount = 1;
+                while (closeParen < expr.length() && parenCount > 0) {
+                    if (expr.charAt(closeParen) == '(') parenCount++;
+                    if (expr.charAt(closeParen) == ')') parenCount--;
+                    closeParen++;
+                }
+
+                String inside = expr.substring(openParen + 1, closeParen - 1).trim();
+
+                // Handle count(*) specially
+                if (inside.equals("*")) {
+                    pos = closeParen;
+                    continue;
+                }
+
+                if (inside.contains(".")) {
+                    String[] parts = inside.split("\\.");
+                    String gv = parts[0].trim();
+                    String att = parts[1].trim();
+
+                    boolean exists = false;
+                    for (AggregateFunction existing : list) {
+                        if (existing.getFunctionName().equals(fn) &&
+                            existing.getGroupingVarName().equals(gv) &&
+                            existing.getAttribute().equals(att)) {
+                            exists = true;
+                            break;
+                        }
+                    }
+
+                    if (!exists) {
+                        list.add(new AggregateFunction(fn, gv, att));
+                    }
+                }
+
+                pos = closeParen;
+            } else {
+                pos = openParen + 1;
+            }
+        }
     }
 }

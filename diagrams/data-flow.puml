@@ -1,0 +1,51 @@
+@startuml Data Flow Diagram
+!theme plain
+skinparam backgroundColor #FEFEFE
+
+title ESQL Processor - Data Flow Diagram
+
+' External entities
+actor "User" as user
+database "PostgreSQL\nDatabase" as db
+file "GeneratedQuery.java" as output_file
+file "Query Results" as results
+
+' Processes
+rectangle "1.0\nInput\nProcessing" as p1
+rectangle "2.0\nQuery\nParsing" as p2
+rectangle "3.0\nValidation" as p3
+rectangle "4.0\nPhi\nConversion" as p4
+rectangle "5.0\nCode\nGeneration" as p5
+rectangle "6.0\nQuery\nExecution" as p6
+
+' Data stores
+collections "EMFQuery\n(Internal Rep)" as ds1
+collections "PhiOperator\n(6 Operands)" as ds2
+collections "Column\nMetadata" as ds3
+
+' Data flows
+user --> p1 : "ESQL Query /\nPhi Format /\nInteractive Input"
+
+p1 --> p2 : "Normalized\nQuery String"
+
+p2 --> ds1 : "Parsed Query\nStructure"
+
+ds1 --> p3 : "EMFQuery"
+p3 --> p4 : "Validated\nEMFQuery"
+
+p4 --> ds2 : "PhiOperator"
+
+db --> ds3 : "JDBC\nMetadata"
+
+ds2 --> p5
+ds3 --> p5
+
+p5 --> output_file : "Generated\nJava Code"
+
+output_file --> p6 : "Compiled\nProgram"
+db --> p6 : "Table Data\n(via JDBC)"
+
+p6 --> results : "Query\nOutput"
+results --> user
+
+@enduml

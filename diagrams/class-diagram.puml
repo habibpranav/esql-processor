@@ -1,0 +1,142 @@
+@startuml Class Diagram
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam classAttributeIconSize 0
+
+title ESQL Processor - Class Diagram
+
+class Main {
+    +main(args: String[]): void
+    -readFile(path: String): String
+}
+
+class EMFParser {
+    +parse(input: String): EMFQuery
+    -extractSections(input: String): Map<String, String>
+    -parseSelect(section: String): void
+    -parseGroupBy(section: String): void
+    -parseSuchThat(section: String): void
+    -parseHaving(section: String): void
+    -parseConditionExpression(s: String): ConditionExpression
+    -parseSingleCondition(s: String): Condition
+    -extractAggregatesFromExpression(expr: String, list: List): void
+}
+
+class PhiInputParser {
+    +parse(input: String): EMFQuery
+    -parseSections(input: String): Map<String, String>
+    -parseCommaSeparated(line: String): List<String>
+    -parsePredicates(line: String): List<String>
+    -convertToEMFQuery(...): EMFQuery
+    -parseConditionExpression(s: String): ConditionExpression
+    -parseSingleCondition(s: String): Condition
+    -extractAggregatesFromExpression(expr: String, list: List): void
+    -extractVarNameFromPredicate(pred: String): String
+    -extractAllVarNames(expr: String, varNames: Set): void
+}
+
+class EMFQuery {
+    +selectAttributes: List<String>
+    +fromTable: String
+    +groupingAttributes: List<String>
+    +groupingVariableNames: List<String>
+    +suchThatMap: Map<String, ConditionExpression>
+    +fVectors: List<AggregateFunction>
+    +whereConditions: ConditionExpression
+    +havingConditions: ConditionExpression
+    +toString(): String
+}
+
+class EMFValidator {
+    +validate(query: EMFQuery): void
+    -validateGroupingVariables(): void
+    -validateAggregates(): void
+}
+
+class PhiConverter {
+    +convert(emfQuery: EMFQuery): PhiOperator
+}
+
+class PhiOperator {
+    +selectAttributes: List<String>
+    +n: int
+    +groupingAttributes: List<String>
+    +fVect: List<AggregateFunction>
+    +predicates: Map<Integer, ConditionExpression>
+    +having: ConditionExpression
+    +fromTable: String
+    +groupingVariableNames: List<String>
+    +toString(): String
+}
+
+class QueryGenerator {
+    -phi: PhiOperator
+    -columnTypes: Map<String, String>
+    +QueryGenerator(phi: PhiOperator)
+    +generate(): String
+    -loadColumnTypes(): void
+    -generateMFStruct(): String
+    -generateLookup(): String
+    -generateAdd(): String
+    -generateOutput(): String
+    -generateScan0(): String
+    -generateScans(): String
+    -buildCondition(cond: ConditionExpression, rs: String, idx: String): String
+    -buildHaving(): String
+    -translateExpr(expr: String, idx: String): String
+    -fieldName(agg: AggregateFunction): String
+}
+
+class AggregateFunction {
+    -functionName: String
+    -groupingVarName: String
+    -attribute: String
+    +AggregateFunction(fn: String, gv: String, attr: String)
+    +getFunctionName(): String
+    +getGroupingVarName(): String
+    +getAttribute(): String
+}
+
+class ConditionExpression {
+    +conditions: List<Condition>
+    +operators: List<String>
+}
+
+class Condition {
+    +left: String
+    +operator: String
+    +right: String
+    +negated: boolean
+    +Condition(left, op, right, neg)
+}
+
+' Relationships
+Main --> EMFParser : uses
+Main --> PhiInputParser : uses
+Main --> EMFValidator : uses
+Main --> PhiConverter : uses
+Main --> QueryGenerator : uses
+
+EMFParser --> EMFQuery : creates
+PhiInputParser --> EMFQuery : creates
+EMFParser --> ConditionExpression : creates
+EMFParser --> Condition : creates
+EMFParser --> AggregateFunction : creates
+PhiInputParser --> ConditionExpression : creates
+PhiInputParser --> Condition : creates
+PhiInputParser --> AggregateFunction : creates
+
+EMFValidator --> EMFQuery : validates
+PhiConverter --> EMFQuery : reads
+PhiConverter --> PhiOperator : creates
+
+QueryGenerator --> PhiOperator : uses
+QueryGenerator --> AggregateFunction : uses
+
+EMFQuery --> ConditionExpression : contains
+EMFQuery --> AggregateFunction : contains
+PhiOperator --> ConditionExpression : contains
+PhiOperator --> AggregateFunction : contains
+ConditionExpression --> Condition : contains
+
+@enduml

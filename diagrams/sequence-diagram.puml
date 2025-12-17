@@ -1,0 +1,78 @@
+@startuml Query Processing Sequence
+!theme plain
+skinparam backgroundColor #FEFEFE
+
+title ESQL Processor - Query Processing Sequence
+
+actor User
+participant "Main" as main
+participant "EMFParser\nor\nPhiInputParser" as parser
+participant "EMFQuery" as emfq
+participant "EMFValidator" as validator
+participant "PhiConverter" as converter
+participant "PhiOperator" as phi
+participant "QueryGenerator" as generator
+database "PostgreSQL" as db
+participant "GeneratedQuery.java" as generated
+
+User -> main: Run with query file/input
+activate main
+
+alt ESQL Format (Option 1)
+    main -> parser: parse(esqlString)
+else Phi Format (Option 2)
+    main -> parser: parse(phiString)
+end
+
+activate parser
+parser -> parser: extractSections()
+parser -> parser: parseSelect()
+parser -> parser: parseGroupBy()
+parser -> parser: parseSuchThat()
+parser -> parser: parseHaving()
+parser -> parser: extractAggregates()
+parser -> emfq: create EMFQuery
+deactivate parser
+
+main -> validator: validate(emfQuery)
+activate validator
+validator -> validator: validateGroupingVariables()
+validator -> validator: validateAggregates()
+validator --> main: validation passed
+deactivate validator
+
+main -> converter: convert(emfQuery)
+activate converter
+converter -> phi: create PhiOperator
+converter --> main: PhiOperator
+deactivate converter
+
+main -> generator: new QueryGenerator(phi)
+activate generator
+generator -> db: getMetaData()\nfetch column types
+db --> generator: column types map
+generator -> generator: generateMFStruct()
+generator -> generator: generateLookup()
+generator -> generator: generateAdd()
+generator -> generator: generateOutput()
+generator -> generator: generateScan0()
+generator -> generator: generateScans()
+generator -> generator: buildConditions()
+generator -> generator: translateExpressions()
+generator --> main: generated Java code
+deactivate generator
+
+main -> generated: write to file
+main --> User: Display generated code
+
+User -> generated: Compile & Run
+activate generated
+generated -> db: SELECT * FROM table
+db --> generated: ResultSet
+generated -> generated: Populate MF-Structure
+generated -> generated: Execute scans
+generated -> generated: Apply having condition
+generated --> User: Query Results
+deactivate generated
+
+@enduml

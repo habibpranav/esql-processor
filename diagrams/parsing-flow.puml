@@ -1,0 +1,96 @@
+@startuml EMF Parser Flow
+!theme plain
+skinparam backgroundColor #FEFEFE
+
+title EMFParser - Detailed Parsing Flow
+
+start
+
+:Receive raw ESQL query string;
+
+:Convert to lowercase;
+:Normalize whitespace;
+
+partition "Section Extraction" {
+    :Find keyword positions:\nSELECT, FROM, WHERE,\nGROUP BY, SUCH THAT, HAVING;
+
+    :Extract sections between keywords;
+
+    :Store in Map<String, String>;
+}
+
+partition "Parse SELECT" {
+    :Split by comma;
+    :Trim each attribute;
+    :Store in selectAttributes list;
+
+    :For each attribute containing aggregate;
+    :Extract aggregate function\n(sum, avg, count, min, max);
+    :Extract grouping variable name;
+    :Extract attribute name;
+    :Add to fVectors list;
+}
+
+partition "Parse FROM" {
+    :Extract table name;
+    :Store in fromTable;
+}
+
+partition "Parse WHERE (σ0)" {
+    if (WHERE clause exists?) then (yes)
+        :Parse condition expression;
+        :Split by AND/OR (case-insensitive);
+        :For each condition;
+        :Parse left operand, operator, right operand;
+        :Create Condition object;
+        :Track logical operators (and/or);
+        :Store in whereConditions;
+    else (no)
+        :whereConditions = empty;
+    endif
+}
+
+partition "Parse GROUP BY" {
+    :Split by semicolon;
+    :Left side = grouping attributes;
+    :Right side = grouping variable names;
+
+    :Parse grouping attributes (comma-separated);
+    :Parse grouping variable names (comma-separated);
+
+    :Store in groupingAttributes;
+    :Store in groupingVariableNames;
+}
+
+partition "Parse SUCH THAT" {
+    :Split predicates by comma\n(respecting parentheses);
+
+    :For each predicate;
+    :Identify grouping variable\nfrom prefix (e.g., x.cust);
+    :Parse condition expression;
+    :Handle nested conditions with AND/OR;
+    :Extract any aggregate references;
+    :Add aggregates to fVectors;
+
+    :Store in suchThatMap\n(varName -> ConditionExpression);
+}
+
+partition "Parse HAVING" {
+    if (HAVING clause exists?) then (yes)
+        :Parse condition expression;
+        :Extract aggregate functions;
+        :Add to fVectors if not exists;
+        :Store in havingConditions;
+    else (no)
+        :havingConditions = empty;
+    endif
+}
+
+:Create EMFQuery object;
+:Populate all fields;
+
+:Return EMFQuery;
+
+stop
+
+@enduml

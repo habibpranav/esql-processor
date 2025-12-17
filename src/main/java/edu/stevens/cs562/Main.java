@@ -98,6 +98,9 @@ public class Main {
                         queryBuilder.append("HAVING_CONDITION(G):\n").append(having).append("\n");
                     }
                     rawQuery = queryBuilder.toString();
+
+                   // System.out.println("--------------This is for debugging The raw Query" + rawQuery);//Debugging
+
                 }
                 scanner.close();
             }
@@ -114,6 +117,8 @@ public class Main {
             } else {
                 // Parse Phi operator format
                 PhiInputParser phiParser = new PhiInputParser();
+
+               // System.out.println("--------------This is for debugging The raw Query" + rawQuery);//Debugging
                 emfQuery = phiParser.parse(rawQuery);
             }
 
@@ -138,15 +143,15 @@ public class Main {
 
             String outputPath = "src/main/java/GeneratedQuery.java";
             Files.writeString(Paths.get(outputPath), generatedCode);
-            System.out.println("Code generated: " + outputPath);
+            System.out.println("Generated: " + outputPath);
 
             System.out.println("\n=== GENERATED CODE ===");
             System.out.println(generatedCode);
 
-            System.out.println("\n\n=== INSTRUCTIONS ===");
-            System.out.println("To execute the generated query:");
-            System.out.println("1. Compile: javac src/main/java/GeneratedQuery.java");
-            System.out.println("2. Run: java -cp src/main/java GeneratedQuery");
+            System.out.println("\n=== INSTRUCTIONS ===");
+            System.out.println("To compile and run:");
+            System.out.println("  javac src/main/java/GeneratedQuery.java");
+            System.out.println("  java -cp src/main/java GeneratedQuery");
 
         } catch (Exception e) {
             System.err.println("Error: " + e.getMessage());

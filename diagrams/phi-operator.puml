@@ -1,0 +1,97 @@
+@startuml Phi Operator Structure
+!theme plain
+skinparam backgroundColor #FEFEFE
+
+title Phi (φ) Operator - 6 Operands
+
+package "φ (Phi Operator)" {
+
+    card "**1. S - Select Attributes**" as s {
+        note as s_note
+            Projected columns in output
+            --
+            Example:
+            [cust, avg(X.quant), avg(Y.quant)]
+        end note
+    }
+
+    card "**2. n - Number of Grouping Variables**" as n {
+        note as n_note
+            Count of grouping variables
+            --
+            Example: 3 (for X, Y, Z)
+        end note
+    }
+
+    card "**3. V - Grouping Attributes**" as v {
+        note as v_note
+            GROUP BY columns
+            --
+            Example: [cust, prod]
+        end note
+    }
+
+    card "**4. F - Aggregate Functions (F-VECT)**" as f {
+        note as f_note
+            All aggregates needed
+            --
+            Example:
+            [avg(X.quant), avg(Y.quant),
+             sum(Z.quant), count(Z.*)]
+        end note
+    }
+
+    card "**5. σ - Selection Predicates**" as sigma {
+        note as sigma_note
+            Conditions for each grouping variable
+            --
+            σ0 (WHERE): year = 2016
+            σ1 (X): X.cust = cust AND X.state = 'NY'
+            σ2 (Y): Y.cust = cust AND Y.state = 'CT'
+            σ3 (Z): Z.cust = cust AND Z.state = 'NJ'
+        end note
+    }
+
+    card "**6. G - Having Condition**" as g {
+        note as g_note
+            Filter on aggregated results
+            --
+            Example:
+            avg(X.quant) > avg(Y.quant)
+            AND avg(X.quant) > avg(Z.quant)
+        end note
+    }
+}
+
+package "Example Transformation" {
+    note as esql
+        **ESQL Input:**
+        ════════════════════════════════════
+        SELECT cust, avg(X.quant), avg(Y.quant)
+        FROM Sales
+        WHERE year = 2016
+        GROUP BY cust ; X, Y
+        SUCH THAT X.cust=cust AND X.state='NY',
+                  Y.cust=cust AND Y.state='CT'
+        HAVING avg(X.quant) > avg(Y.quant)
+    end note
+
+    note as phi_result
+        **Phi Operator Result:**
+        ════════════════════════════════════
+        φ(S, n, V, F, σ, G) where:
+        --
+        S = [cust, avg(X.quant), avg(Y.quant)]
+        n = 2
+        V = [cust]
+        F = [avg(X.quant), avg(Y.quant)]
+        σ = {0: year=2016,
+             1: X.cust=cust ∧ X.state='NY',
+             2: Y.cust=cust ∧ Y.state='CT'}
+        G = avg(X.quant) > avg(Y.quant)
+    end note
+
+    esql -right-> phi_result : "PhiConverter"
+}
+
+@enduml

@@ -4,14 +4,6 @@ import java.io.*;
 
 public class GeneratedQuery {
 
-    static Map<String, Map<String, Object>> mfStruct = new HashMap<>();
-
-%s
-
-%s
-
-%s
-
 %s
 
     public static void main(String[] args) throws Exception {
@@ -29,27 +21,5 @@ public class GeneratedQuery {
 %s
 
         conn.close();
-    }
-
-    static void updateAgg(Map<String, Object> row, String name, String func, int val) {
-        if (func.equals("count")) {
-            row.put(name, (Integer)row.get(name) + 1);
-        } else if (func.equals("sum")) {
-            row.put(name, (Integer)row.get(name) + val);
-        } else if (func.equals("max")) {
-            row.put(name, Math.max((Integer)row.get(name), val));
-        } else if (func.equals("min")) {
-            int cur = (Integer)row.get(name);
-            if (cur == Integer.MAX_VALUE) cur = val;
-            row.put(name, Math.min(cur, val));
-        } else if (func.equals("avg")) {
-            String cntKey = name + "_cnt";
-            String sumKey = name + "_sum";
-            int cnt = (Integer)row.getOrDefault(cntKey, 0) + 1;
-            int sum = (Integer)row.getOrDefault(sumKey, 0) + val;
-            row.put(cntKey, cnt);
-            row.put(sumKey, sum);
-            row.put(name, (double)sum / cnt);
-        }
     }
 }

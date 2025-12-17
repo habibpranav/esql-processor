@@ -20,21 +20,6 @@ public class EMFParser {
             throw new RuntimeException("Empty query received.");
         }
 
-        // Remove comments (lines starting with ---, //, #, or --)
-        String[] lines = raw.split("\n");
-        StringBuilder cleanedQuery = new StringBuilder();
-        for (String line : lines) {
-            String trimmedLine = line.trim();
-            if (trimmedLine.startsWith("---") ||
-                trimmedLine.startsWith("//") ||
-                trimmedLine.startsWith("#") ||
-                trimmedLine.startsWith("--")) {
-                break;
-            }
-            cleanedQuery.append(line).append(" ");
-        }
-        raw = cleanedQuery.toString();
-
         // Extract string literals to preserve their case
         List<String> stringLiterals = new ArrayList<>();
         String temp = raw;
@@ -60,11 +45,11 @@ public class EMFParser {
         Map<String, String> sections = extractSections(input);
 
         EMFQuery q = new EMFQuery();
-        q.selectAttributes = parseSelect(sections.get("select"));
-        q.fromTable = parseFrom(sections.get("from"));
-        q.whereConditions = parseWhere(sections.get("where"));
-        parseGroupBy(q, sections.get("group by"));
-        q.suchThatMap = parseSuchThat(sections.get("such that"), q.groupingVariableNames);
+        q.selectAttributes = parseSelect(sections.get("select"));//
+        q.fromTable = parseFrom(sections.get("from"));//
+        q.whereConditions = parseWhere(sections.get("where"));//
+        parseGroupBy(q, sections.get("group by"));//
+        q.suchThatMap = parseSuchThat(sections.get("such that"), q.groupingVariableNames);//
         q.fVectors = parseFVectorsFromSelect(q.selectAttributes);
         extractAggregatesFromSuchThat(q.suchThatMap, q.fVectors);
         q.havingConditions = parseHaving(sections.get("having"));
@@ -73,6 +58,23 @@ public class EMFParser {
         return q;
     }
 
+    /**
+     * Extracts each clause from the ESQL query string into a Map.
+     *
+     * Given a query like:
+     *   "select cust, avg(x.quant) from sales where year=2020 group by cust; x such that x.state='NY'"
+     *
+     * Returns a Map:
+     *   "select"    -> "cust, avg(x.quant)"
+     *   "from"      -> "sales"
+     *   "where"     -> "year=2020"
+     *   "group by"  -> "cust; x"
+     *   "such that" -> "x.state='NY'"
+     *   "having"    -> ""
+     *
+     * @param input The lowercased, normalized query string
+     * @return Map of clause name to clause content
+     */
     private Map<String, String> extractSections(String input) {
         String[] order = {"select", "from", "where", "group by", "such that", "having"};
         Map<String, String> map = new HashMap<>();
@@ -139,7 +141,7 @@ public class EMFParser {
             return;
         }
 
-        String[] parts = s.split("[;:]");
+        String[] parts = s.split("[;:]");//Supports EMF and MF
 
         if (parts.length == 0) {
             throw new RuntimeException("Invalid GROUP BY syntax.");
@@ -273,10 +275,22 @@ public class EMFParser {
 
                 String inside = expr.substring(openParen + 1, closeParen - 1).trim();
 
+                // Handle count(*) or count(x.*) specially
+                if (inside.equals("*")) {
+                    // count(*) without grouping variable - skip or handle as special case
+                    pos = closeParen;
+                    continue;
+                }
+
                 if (inside.contains(".")) {
                     String[] parts = inside.split("\\.");
                     String gv = parts[0].trim();
                     String att = parts[1].trim();
+
+                    // Handle  attribute is "*"
+                    if (att.equals("*")) {
+                        att = "*";
+                    }
 
                     boolean exists = false;
                     for (AggregateFunction existing : list) {
@@ -387,9 +401,11 @@ public class EMFParser {
             s = s.substring(4).trim();
         }
 
+        // Order matters: check multi-char operators first
         if (s.contains(">=")) return split(s, ">=", neg);
         if (s.contains("<=")) return split(s, "<=", neg);
         if (s.contains("<>")) return split(s, "<>", neg);
+        if (s.contains("!=")) return split(s, "!=", neg);  // Support != as well as <>
         if (s.contains(">"))  return split(s, ">",  neg);
         if (s.contains("<"))  return split(s, "<",  neg);
         if (s.contains("="))  return split(s, "=",  neg);

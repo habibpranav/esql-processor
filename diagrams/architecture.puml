@@ -1,0 +1,93 @@
+@startuml ESQL Processor Architecture
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle rectangle
+
+title ESQL Processor - System Architecture
+
+package "Input Layer" {
+    [ESQL File] as esql_file
+    [Phi Format File] as phi_file
+    [Interactive Input] as interactive
+}
+
+package "Parsing Layer" {
+    [EMFParser] as emf_parser
+    [PhiInputParser] as phi_parser
+    [Main.java\n(Interactive Prompts)] as main_prompts
+}
+
+package "Internal Representation" {
+    [EMFQuery] as emf_query
+    note right of emf_query
+        Internal IR containing:
+        - selectAttributes
+        - fromTable
+        - groupingAttributes
+        - groupingVariableNames
+        - suchThatMap
+        - fVectors
+        - whereConditions
+        - havingConditions
+    end note
+}
+
+package "Validation & Conversion" {
+    [EMFValidator] as validator
+    [PhiConverter] as converter
+}
+
+package "Phi Operator Model" {
+    [PhiOperator] as phi_op
+    note right of phi_op
+        6 Operands:
+        1. S - Select attributes
+        2. n - Number of grouping vars
+        3. V - Grouping attributes
+        4. F - Aggregate functions
+        5. σ - Selection predicates
+        6. G - Having condition
+    end note
+}
+
+package "Code Generation" {
+    [QueryGenerator] as generator
+    [GeneratedQuery.java] as generated
+}
+
+database "PostgreSQL" as db {
+    [JDBC Metadata] as metadata
+    [Sales Table] as sales
+}
+
+package "Execution" {
+    [Java Compiler] as compiler
+    [Query Results] as results
+}
+
+' Input flows
+esql_file --> emf_parser : "Option 1"
+phi_file --> phi_parser : "Option 2"
+interactive --> main_prompts : "No file arg"
+main_prompts --> phi_parser : "Builds Phi format string"
+
+' Parsing outputs
+emf_parser --> emf_query
+phi_parser --> emf_query
+
+' Validation & Conversion
+emf_query --> validator
+validator --> converter
+converter --> phi_op
+
+' Code Generation
+phi_op --> generator
+metadata --> generator : "Column types"
+generator --> generated
+
+' Execution
+generated --> compiler
+compiler --> sales : "JDBC queries"
+sales --> results
+
+@enduml

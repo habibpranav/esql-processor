@@ -1,0 +1,87 @@
+@startuml MF-Structure Concept
+!theme plain
+skinparam backgroundColor #FEFEFE
+
+title MF-Structure (Materialized Fact Structure) Concept
+
+note as query
+    **ESQL Query:**
+    ══════════════════════════════════════════
+    SELECT cust, avg(X.quant), avg(Y.quant)
+    FROM Sales
+    GROUP BY cust ; X, Y
+    SUCH THAT X.cust=cust AND X.state='NY',
+              Y.cust=cust AND Y.state='CT'
+    HAVING avg(X.quant) > avg(Y.quant)
+end note
+
+note as struct
+    **Generated MFStruct Class:**
+    ══════════════════════════════════════════
+    class MFStruct {
+        // Grouping Attributes
+        String cust;
+
+        // Aggregates for X (state='NY')
+        double avg_1_quant;
+        int avg_1_quant_cnt;
+        double avg_1_quant_sum;
+
+        // Aggregates for Y (state='CT')
+        double avg_2_quant;
+        int avg_2_quant_cnt;
+        double avg_2_quant_sum;
+    }
+end note
+
+note as runtime
+    **Runtime MF-Structure Array:**
+    ══════════════════════════════════════════
+    mf_struct[0]:
+      cust = "Dan"
+      avg_1_quant = 485.5 (NY avg)
+      avg_2_quant = 512.3 (CT avg)
+
+    mf_struct[1]:
+      cust = "Emily"
+      avg_1_quant = 523.2 (NY avg)
+      avg_2_quant = 498.7 (CT avg)
+
+    mf_struct[2]:
+      cust = "Helen"
+      avg_1_quant = 501.8 (NY avg)
+      avg_2_quant = 478.9 (CT avg)
+end note
+
+note as scans
+    **Scan Process:**
+    ══════════════════════════════════════════
+    Scan 0: Initialize unique (cust) groups
+            ↓
+    Scan 1: For each row where state='NY'
+            Update avg_1_quant for matching cust
+            ↓
+    Scan 2: For each row where state='CT'
+            Update avg_2_quant for matching cust
+            ↓
+    Output: Apply HAVING filter
+            avg_1_quant > avg_2_quant
+end note
+
+note as result
+    **Final Output (after HAVING):**
+    ══════════════════════════════════════════
+    cust  | avg(X.quant) | avg(Y.quant)
+    ------+--------------+-------------
+    Emily | 523.2        | 498.7  ✓
+    Helen | 501.8        | 478.9  ✓
+
+    (Dan filtered out: 485.5 < 512.3)
+end note
+
+query -down-> struct
+struct -down-> runtime
+runtime -down-> scans
+scans -down-> result
+
+@enduml

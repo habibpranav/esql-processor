@@ -1,0 +1,134 @@
+@startuml Code Generation Flow
+!theme plain
+skinparam backgroundColor #FEFEFE
+
+title QueryGenerator - Code Generation Flow
+
+start
+
+:Receive PhiOperator;
+
+partition "Initialize" {
+    :Connect to PostgreSQL;
+    :Fetch table metadata via JDBC;
+    :Build columnTypes map\n(column name -> type);
+    :Close connection;
+}
+
+partition "Generate MFStruct Class" {
+    :Add grouping attribute fields\n(cust: String, prod: String, etc.);
+
+    :For each aggregate in fVect;
+    if (function is avg?) then (yes)
+        :Add field: avg_N_attr (double);
+        :Add field: avg_N_attr_cnt (int);
+        :Add field: avg_N_attr_sum (double);
+    else if (function is sum?) then (yes)
+        :Add field: sum_N_attr\n(int or double based on column type);
+    else if (function is count?) then (yes)
+        :Add field: count_N_attr (int);
+    else (min/max)
+        :Add field: minmax_N_attr\n(type from column metadata);
+    endif
+}
+
+partition "Generate lookup() Method" {
+    :Create method signature with\ngrouping attributes as params;
+
+    :Generate loop through mf_struct;
+
+    :For each grouping attribute;
+    if (type is String?) then (yes)
+        :Generate .equals() comparison;
+    else (numeric)
+        :Generate == comparison;
+    endif
+
+    :Return index if found, -1 otherwise;
+}
+
+partition "Generate add() Method" {
+    :Create new MFStruct instance;
+    :Set grouping attribute values;
+    :Initialize all aggregate fields to 0;
+    :Increment NUM_OF_ENTRIES;
+}
+
+partition "Generate output() Method" {
+    :Print column headers;
+    :Print separator line;
+
+    :Loop through all entries;
+
+    if (HAVING condition exists?) then (yes)
+        :Generate if statement with\ntranslated having condition;
+    endif
+
+    :Generate println with\nall select attributes;
+}
+
+partition "Generate Scan 0 (Initialization)" {
+    :SELECT * FROM table;
+
+    if (WHERE condition exists?) then (yes)
+        :Generate if statement for WHERE;
+    endif
+
+    :Call lookup() - if not found, call add();
+}
+
+partition "Generate Scans 1 to n" {
+    :For each grouping variable (1 to n);
+
+    :SELECT * FROM table;
+
+    if (WHERE condition exists?) then (yes)
+        :Generate if statement for WHERE;
+    endif
+
+    :Loop through mf_struct entries;
+
+    :Build condition from predicate σi;
+    note right
+        Translate conditions:
+        - x.attr = groupingAttr
+          → rs.get("attr").equals(mf_struct[j].attr)
+        - x.attr = value
+          → rs.get("attr") == value
+        - x.attr > avg(y.attr)
+          → rs.get("attr") > mf_struct[j].avg_Y_attr
+    end note
+
+    :Generate if statement with condition;
+
+    :For each aggregate for this grouping var;
+    if (function is sum?) then (yes)
+        :field += rs.getXXX("attr");
+    else if (function is count?) then (yes)
+        :field++;
+    else if (function is avg?) then (yes)
+        :field_cnt++;
+        :field_sum += rs.getXXX("attr");
+        :field = field_sum / field_cnt;
+    else if (function is min?) then (yes)
+        :if (field == 0 || val < field) field = val;
+    else (max)
+        :if (val > field) field = val;
+    endif
+}
+
+partition "Generate main() Method" {
+    :Load db.properties;
+    :Create JDBC connection;
+    :Call Scan 0;
+    :Call Scans 1 to n;
+    :Call output();
+    :Close connection;
+}
+
+:Assemble all generated code;
+:Return complete Java source;
+
+stop
+
+@enduml

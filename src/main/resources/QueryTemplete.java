@@ -9,9 +9,6 @@ import java.io.*;
  * This .java file is just a mirror of QueryTemplate.txt to help with editing.
  * DO NOT pass this file to QueryGenerator - it reads QueryTemplate.txt directly
  */
-
-
-
 public class GeneratedQuery {
 
     static List<Map<String, Object>> mfStruct = new ArrayList<>();
